@@ -158,21 +158,27 @@
   .patch{position:absolute;overflow:hidden;pointer-events:none;}
   .patch img{position:absolute;max-width:none;pointer-events:none;}
 
-  /* 楼栋气泡热区 */
-  .hotspot{position:absolute;transform:translate(-50%,-50%);
+  /* 楼栋气泡热区（--labelK 由 JS 随地图缩放反算，保证小屏上文字/点按区域够大） */
+  .hotspot{position:absolute;transform:translate(-50%,-50%) scale(var(--labelK,1));
     background:rgba(255,255,255,.97);border:2px solid var(--blue);border-radius:999px;
     padding:4px 12px;font-size:12.5px;color:#2b6cb0;cursor:pointer;white-space:nowrap;
     box-shadow:0 3px 10px rgba(20,60,120,.25);display:flex;align-items:center;gap:6px;
     transition:.15s;font-weight:700;z-index:10;}
   .hotspot::after{content:"";position:absolute;left:50%;bottom:-7px;transform:translateX(-50%);
     border:6px solid transparent;border-top-color:var(--blue);border-bottom:none;}
-  .hotspot:hover{background:var(--blue);color:#fff;transform:translate(-50%,-50%) scale(1.08);}
+  .hotspot:hover{background:var(--blue);color:#fff;transform:translate(-50%,-50%) scale(calc(var(--labelK,1)*1.08));}
   .hotspot .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;box-shadow:0 0 0 2px rgba(255,255,255,.9);}
   .hotspot .cnt{font-weight:500;font-size:10.5px;color:inherit;opacity:.85;}
   .hotspot.dim{opacity:.3;filter:grayscale(1);}
+  /* 标签避让：被其他标签压住时临时隐藏（declutter 控制），放大后自动恢复 */
+  .hotspot.hs-hide,.navpin.hs-hide{opacity:0 !important;pointer-events:none;}
+  .navpin{transition:opacity .15s;}
+  /* 远景减负：小比例尺时收窄气泡（隐藏空闲计数），POI 只留图针不留文字 */
+  #world.z-out .hotspot .cnt{display:none;}
+  #world.z-out .poi .label{display:none;}
 
   /* 「我的位置」实时定位标记 */
-  .me-marker{position:absolute;width:16px;height:16px;transform:translate(-50%,-50%);z-index:15;pointer-events:none;}
+  .me-marker{position:absolute;width:16px;height:16px;transform:translate(-50%,-50%) scale(var(--labelK,1));z-index:15;pointer-events:none;}
   .me-marker::before{content:"";position:absolute;inset:-9px;border-radius:50%;
     background:rgba(45,127,249,.35);animation:mePulse 2s ease-out infinite;}
   .me-marker::after{content:"";position:absolute;inset:0;border-radius:50%;background:#2d7ff9;
@@ -259,7 +265,7 @@
   #navCardB .nav-steps .no{width:16px;height:16px;background:var(--green-light);color:var(--green-dark);
     font-size:10px;font-weight:700;}
 
-  /* POI */  .poi{position:absolute;transform:translate(-50%,-100%);display:flex;flex-direction:column;
+  /* POI */  .poi{position:absolute;transform:translate(-50%,-100%) scale(var(--labelK,1));display:flex;flex-direction:column;
     align-items:center;gap:2px;pointer-events:none;z-index:5;filter:drop-shadow(0 3px 4px rgba(0,0,0,.28));}
   .poi .pin{width:28px;height:28px;border-radius:50% 50% 50% 4px;transform:rotate(-45deg);
     display:flex;align-items:center;justify-content:center;border:2px solid #fff;}
@@ -371,13 +377,13 @@
   #navWorld{position:absolute;left:0;top:0;width:1080px;height:1143px;transform-origin:0 0;}
   #navImg{position:absolute;inset:0;width:100%;height:100%;user-select:none;-webkit-user-drag:none;pointer-events:none;}
   #navRouteSvg{position:absolute;left:0;top:0;pointer-events:none;overflow:visible;}
-  .navpin{position:absolute;transform:translate(-50%,-100%);text-align:center;cursor:pointer;z-index:6;
+  .navpin{position:absolute;transform:translate(-50%,-100%) scale(var(--nlabelK,1));text-align:center;cursor:pointer;z-index:6;
     filter:drop-shadow(0 3px 6px rgba(31,122,74,.38));}
   .navpin .b{display:inline-block;background:#e33d3d;color:#fff;font-size:11.5px;font-weight:700;
     padding:3px 9px;border-radius:11px 11px 11px 2px;white-space:nowrap;}
   .navpin .s{width:2.5px;height:9px;background:#e33d3d;margin:-1px auto 0;}
   .navpin:hover .b,.navpin.sel .b{background:#ff6b3d;}
-  .navme{position:absolute;width:16px;height:16px;transform:translate(-50%,-50%);z-index:7;}
+  .navme{position:absolute;width:16px;height:16px;transform:translate(-50%,-50%) scale(var(--nlabelK,1));z-index:7;pointer-events:none;}
   .navme i{position:absolute;inset:0;border-radius:50%;background:#19b06b;border:2.5px solid #fff;
     box-shadow:0 0 10px rgba(25,176,107,.85);}
   .navme .pulse{position:absolute;left:50%;top:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;
@@ -1247,11 +1253,17 @@ function getNavG(){
 
 /* —— 视图：拖拽 / 滚轮缩放 / 复位 —— */
 let nS=1, nTx=0, nTy=0;
-function navApply(){ navWorld.style.transform = "translate("+nTx+"px,"+nTy+"px) scale("+nS+")"; }
+function navApply(){
+  navWorld.style.transform = "translate("+nTx+"px,"+nTy+"px) scale("+nS+")";
+  /* 标牌反缩放：小屏上红色标牌/定位点保持可读（上限 2.6 倍） */
+  navWorld.style.setProperty("--nlabelK", Math.min(2.6, Math.max(1, 0.72/nS)).toFixed(3));
+  if (navPinEls.length) declutter(navPinEls);
+}
 function navFit(){
   const vw = navStage.clientWidth || 800, vh = navStage.clientHeight || 600, pad = 26;
-  nS  = Math.min((vw-pad*2)/NW, (vh-pad*2)/NH);
-  nTx = (vw-NW*nS)/2;  nTy = (vh-NH*nS)/2;
+  let s = Math.min((vw-pad*2)/NW, (vh-pad*2)/NH);
+  if (vw <= 620) s = Math.max(s, 0.5);   /* 手机初始视野放大些，捏合缩小可看全图 */
+  nTx = (vw-NW*s)/2;  nTy = (vh-NH*s)/2;  nS = s;
   navApply();
 }
 function navZoomCenter(f){
@@ -1324,6 +1336,7 @@ document.getElementById("navZoomFit").addEventListener("click", navFit);
 
 /* —— 标记：起点 + 全部可导航点位（每栋楼都能导航） —— */
 let navMarkersBuilt = false;
+let navPinEls = [];
 function buildNavMarkers(){
   if (navMarkersBuilt) return;
   navMarkersBuilt = true;
@@ -1341,6 +1354,7 @@ function buildNavMarkers(){
     el.addEventListener("click", ()=>navRoute(id));
     navWorld.appendChild(el);
   });
+  navPinEls = [...navWorld.querySelectorAll(".navpin")];
 }
 
 /* —— 沿白色道路规划路线（Dijkstra + 避湖吸附） —— */
@@ -1964,11 +1978,38 @@ function applySchool(id, silent){
 let scale = 1, tx = 0, ty = 0, userZoomed = false;
 const MIN_S = 0.3, MAX_S = 4;
 
-function applyTransform(){ world.style.transform = "translate("+tx+"px,"+ty+"px) scale("+scale+")"; }
+/* 标签避让（地图 App 同款）：屏幕矩形相交时后一个标签自动隐藏，缩放/平移后重算，放大即可恢复。
+   避免手机小屏上密集楼栋气泡互相压住、点不准。带 .sel 的选中标记永不隐藏。 */
+function declutter(els){
+  const shown=[];
+  for (let i=0;i<els.length;i++){
+    const e=els[i];
+    if (e.classList.contains("sel")){ e.classList.remove("hs-hide"); shown.push(e.getBoundingClientRect()); continue; }
+    const r=e.getBoundingClientRect();
+    if (!r.width || r.right<0 || r.bottom<0 || r.left>innerWidth || r.top>innerHeight){ e.classList.add("hs-hide"); continue; }
+    let c=false;
+    for (let j=0;j<shown.length;j++){
+      const b=shown[j];
+      if (r.left<b.right-2 && r.right>b.left+2 && r.top<b.bottom-2 && r.bottom>b.top+2){ c=true; break; }
+    }
+    if (c) e.classList.add("hs-hide");
+    else { e.classList.remove("hs-hide"); shown.push(r); }
+  }
+}
+
+function applyTransform(){
+  world.style.transform = "translate("+tx+"px,"+ty+"px) scale("+scale+")";
+  /* 标签反缩放：地图缩得越小时气泡/POI/定位标签在屏幕上越大（上限 2.6 倍），手机可读可点；桌面正常倍率不受影响 */
+  world.style.setProperty("--labelK", Math.min(2.6, Math.max(1, 0.85/scale)).toFixed(3));
+  /* 远景自动减负：隐藏气泡中的空闲数与 POI 文字标签，减少手机小屏上的互相遮挡 */
+  world.classList.toggle("z-out", scale < 0.75);
+  if (Object.keys(hotspots).length) declutter(Object.values(hotspots));
+}
 
 function fitView(){
   const vw = mapArea.clientWidth, vh = mapArea.clientHeight;
-  const s = Math.min((vw-90)/layerW, (vh-100)/layerH);
+  let s = Math.min((vw-90)/layerW, (vh-100)/layerH);
+  if (vw <= 620) s = Math.max(s, 0.5);   /* 手机/窄屏初始视野不要太小，捏合缩小仍可看全貌 */
   scale = Math.max(MIN_S, Math.min(s, MAX_S));
   tx = (vw - layerW*scale)/2;
   ty = (vh - layerH*scale)/2;
@@ -2063,6 +2104,7 @@ function refreshBadges(){
                    '<span class="cnt">'+c.free+'/'+c.total+' 空闲</span>';
     el.classList.toggle("dim", filterOn && c.free===0);
   });
+  if (Object.keys(hotspots).length) declutter(Object.values(hotspots));
 }
 function tickClock(){
   const d = new Date();
